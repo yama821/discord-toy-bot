@@ -1,0 +1,12 @@
+[project]
+name = "discord-toy-bot"
+version = "0.1.0"
+description = "discord bot の実験用"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "py-cord>=2.7.1",
+]
+
+[tool.uv]
+dev-dependencies = ["ruff>=0.6.9"]

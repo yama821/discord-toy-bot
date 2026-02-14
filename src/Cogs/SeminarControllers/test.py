@@ -19,14 +19,14 @@ class Test(commands.Cog):
         self,
         ctx: discord.ApplicationContext,
         command_name: discord.Option(
-            input_type=str, description="[省略可]これは引数です", required=False
-        ),  # type: ignore
+            input_type=str, description="[省略可]これは引数です",required=False
+        ), # type: ignore
     ):
         # ?
         assert isinstance(ctx.guild, discord.Guild)
 
         await ctx.respond(content="test test test")
-
+        
 
 def setup(bot: discord.Bot):
     bot.add_cog(Test(bot))

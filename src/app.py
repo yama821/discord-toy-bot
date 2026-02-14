@@ -1,7 +1,8 @@
 import os
-
+import asyncio
 
 import discord
+import database
 
 
 if __name__ == "__main__":
@@ -10,9 +11,16 @@ if __name__ == "__main__":
     intents.typing = False  # Don't react to user's typing event
     intents.presences = False  # Don't react to change of each user's presence
 
-    bot = discord.Bot(intents=intents, description="Wathematicaのゼミを管理します。")
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    bot = discord.Bot(
+        intents=intents, 
+        description="test bot.",
+        loop=loop,
+    )
 
     bot.load_extension("Cogs.seminar_controllers")
+    bot.load_extension("Cogs.guild_controllers")
 
     token = os.environ.get("DISCORD_TOKEN")
     bot.run(token)

@@ -54,7 +54,6 @@ class Seminar(Base):
     name: Mapped[str]
     created_at: Mapped[datetime.datetime]
     finished_at: Mapped[Optional[datetime.datetime]]
-    seminar_state: Mapped[SeminarState]
     leader_id: Mapped[int]
     
     channel_id: Mapped[int] = mapped_column(unique=True)

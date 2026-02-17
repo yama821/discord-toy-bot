@@ -1,7 +1,7 @@
 import asyncio
 import discord
 from database import async_session
-from model import Guild, Category, SeminarState  # Category と SeminarState を追加！
+from model import Guild, Category, SeminarState
 from sqlalchemy import select
 
 # ---------------------------------------------------------
@@ -9,16 +9,18 @@ from sqlalchemy import select
 # ---------------------------------------------------------
 async def get_settings_embed(guild_id: int, guild_name: str, bot: discord.Bot) -> discord.Embed:
     async with async_session() as session:
-        # サーバー基本設定の取得
         stmt_guild = select(Guild).where(Guild.guild_id == guild_id)
         guild = (await session.execute(stmt_guild)).scalar_one_or_none()
 
-        # 登録されているカテゴリー一覧の取得
         stmt_cat = select(Category).where(Category.guild_id == guild_id)
         categories = (await session.execute(stmt_cat)).scalars().all()
 
     # 基本設定の表示文字列作成
-    channel_mention = f"<#{guild.role_setting_channel_id}>" if guild and guild.role_setting_channel_id else "未設定"
+    role_channel_mention = f"<#{guild.role_setting_channel_id}>" if guild and guild.role_setting_channel_id else "未設定"
+    
+    # ▼ 追加: システムチャンネルの表示
+    system_channel_mention = f"<#{guild.system_channel_id}>" if guild and hasattr(guild, 'system_channel_id') and guild.system_channel_id else "未設定"
+    
     engineer_role_mention = f"<@&{guild.engineer_role_id}>" if guild and guild.engineer_role_id else "未設定"
     
     emoji_display = "未設定"
@@ -26,22 +28,22 @@ async def get_settings_embed(guild_id: int, guild_name: str, bot: discord.Bot) -
         emoji_obj = bot.get_emoji(guild.interesting_emoji_id)
         emoji_display = str(emoji_obj) if emoji_obj else f"ID: `{guild.interesting_emoji_id}` (見つかりません)"
 
-    # カテゴリーの仕分け
-    pending_cats = [f"<#{c.category_id}>" for c in categories if c.state == SeminarState.PENDING]
-    ongoing_cats = [f"<#{c.category_id}>" for c in categories if c.state == SeminarState.ONGOING]
-    paused_cats  = [f"<#{c.category_id}>" for c in categories if c.state == SeminarState.PAUSED]
-    finished_cats = [f"<#{c.category_id}>" for c in categories if c.state == SeminarState.FINISHED]
+    pending_cats = [f"`{category.name}`" for category in categories if category.state == SeminarState.PENDING]
+    ongoing_cats = [f"`{category.name}`" for category in categories if category.state == SeminarState.ONGOING]
+    paused_cats  = [f"`{category.name}`" for category in categories if category.state == SeminarState.PAUSED]
+    finished_cats = [f"`{category.name}`" for category in categories if category.state == SeminarState.FINISHED]
 
     embed = discord.Embed(
         title="⚙️ サーバー設定ダッシュボード",
         description="現在の設定状況です。下のボタンから変更を行ってください。",
         color=discord.Colour.blue()
     )
-    embed.add_field(name="現在の権限設定チャンネル", value=channel_mention, inline=False)
-    embed.add_field(name="現在の興味あり絵文字", value=emoji_display, inline=False)
+    # ▼ 追加: システムチャンネルをEmbedに表示
+    embed.add_field(name="現在のシステムチャンネル", value=system_channel_mention, inline=False)
+    embed.add_field(name="現在の権限設定チャンネル", value=role_channel_mention, inline=False)
     embed.add_field(name="現在の技術部ロール", value=engineer_role_mention, inline=False)
+    embed.add_field(name="現在の興味あり絵文字", value=emoji_display, inline=False)
 
-    # カテゴリーの表示エリア（値が空なら「登録なし」とする）
     embed.add_field(name="🟡 仮立て (PENDING)", value=" ".join(pending_cats) or "登録なし", inline=False)
     embed.add_field(name="🟢 本運用 (ONGOING)", value=" ".join(ongoing_cats) or "登録なし", inline=False)
     embed.add_field(name="🔵 休止中 (PAUSED)", value=" ".join(paused_cats) or "登録なし", inline=False)
@@ -49,9 +51,8 @@ async def get_settings_embed(guild_id: int, guild_name: str, bot: discord.Bot) -
     
     return embed
 
-
 # ---------------------------------------------------------
-# ▼ 新規追加: カテゴリー設定用の2段階UI (Step 2: タイプの選択)
+# ▼ カテゴリー設定用の2段階UI (変更なしのため省略せずにそのまま記述)
 # ---------------------------------------------------------
 class CategoryStateSelectView(discord.ui.View):
     def __init__(self, bot: discord.Bot, dashboard_message: discord.Message, selected_category: discord.abc.GuildChannel):
@@ -73,17 +74,14 @@ class CategoryStateSelectView(discord.ui.View):
     )
     async def select_state(self, select_menu: discord.ui.Select, interaction: discord.Interaction):
         state_val = select_menu.values[0]
-
         async with async_session() as session:
             async with session.begin():
-                # サーバーのレコード確保
                 stmt_guild = select(Guild).where(Guild.guild_id == interaction.guild.id)
                 guild = (await session.execute(stmt_guild)).scalar_one_or_none()
                 if not guild:
                     guild = Guild(guild_id=interaction.guild.id, name=interaction.guild.name)
                     session.add(guild)
 
-                # 対象のカテゴリーが既に登録されているか確認
                 stmt_cat = select(Category).where(Category.category_id == self.selected_category.id)
                 category_record = (await session.execute(stmt_cat)).scalar_one_or_none()
 
@@ -94,7 +92,6 @@ class CategoryStateSelectView(discord.ui.View):
                     else:
                         msg = "⚠️ そのカテゴリーは元々登録されていません。"
                 else:
-                    # Enum に変換
                     state_enum = getattr(SeminarState, state_val)
                     if category_record:
                         category_record.state = state_enum
@@ -109,24 +106,16 @@ class CategoryStateSelectView(discord.ui.View):
                         session.add(category_record)
                     msg = f"✅ カテゴリー {self.selected_category.mention} を `{state_val}` として登録しました！"
 
-        # 大元のダッシュボード画面を最新のDB状態で再描画
         new_embed = await get_settings_embed(interaction.guild.id, interaction.guild.name, self.bot)
         await self.dashboard_message.edit(embed=new_embed)
-
-        # 操作完了を通知して、この2段目のView(自分自身)を消す
         await interaction.response.edit_message(content=msg, view=None)
 
-
-# ---------------------------------------------------------
-# ▼ 新規追加: カテゴリー設定用の2段階UI (Step 1: カテゴリーの選択)
-# ---------------------------------------------------------
 class CategorySelectView(discord.ui.View):
     def __init__(self, bot: discord.Bot, dashboard_message: discord.Message):
         super().__init__(timeout=120)
         self.bot = bot
         self.dashboard_message = dashboard_message
 
-    # channel_types=[discord.ChannelType.category] により「カテゴリー」しか選べない専用プルダウンになる
     @discord.ui.select(
         select_type=discord.ComponentType.channel_select,
         placeholder="設定したいカテゴリーを選択...",
@@ -134,8 +123,6 @@ class CategorySelectView(discord.ui.View):
     )
     async def select_category(self, select_menu: discord.ui.Select, interaction: discord.Interaction):
         selected_category = select_menu.values[0]
-        
-        # 2段目のView（状態選択）にバトンタッチする
         next_view = CategoryStateSelectView(self.bot, self.dashboard_message, selected_category)
         await interaction.response.edit_message(
             content=f"次に、カテゴリー {selected_category.mention} の役割を選択してください：", 
@@ -143,13 +130,15 @@ class CategorySelectView(discord.ui.View):
         )
 
 # ---------------------------------------------------------
-# (以前作成した ChannelSelectView と RoleSelectView は省略せずそのまま記述)
+# ▼ 修正: ChannelSelectView を役割・システム兼用にする
 # ---------------------------------------------------------
 class ChannelSelectView(discord.ui.View):
-    def __init__(self, bot: discord.Bot, dashboard_message: discord.Message):
+    # setting_type 引数を追加して、どちらの設定か判別できるようにする
+    def __init__(self, bot: discord.Bot, dashboard_message: discord.Message, setting_type: str):
         super().__init__(timeout=120)
         self.bot = bot
         self.dashboard_message = dashboard_message
+        self.setting_type = setting_type 
 
     @discord.ui.select(
         select_type=discord.ComponentType.channel_select,
@@ -165,11 +154,18 @@ class ChannelSelectView(discord.ui.View):
                 if not guild:
                     guild = Guild(guild_id=interaction.guild.id, name=interaction.guild.name)
                     session.add(guild)
-                guild.role_setting_channel_id = selected_channel.id
+                
+                # setting_type に応じて保存先カラムを変える
+                if self.setting_type == "role":
+                    guild.role_setting_channel_id = selected_channel.id
+                    target_name = "権限設定チャンネル"
+                elif self.setting_type == "system":
+                    guild.system_channel_id = selected_channel.id
+                    target_name = "システムチャンネル"
 
         new_embed = await get_settings_embed(interaction.guild.id, interaction.guild.name, self.bot)
         await self.dashboard_message.edit(embed=new_embed)
-        await interaction.response.send_message(f"✅ チャンネルを {selected_channel.mention} に変更しました！", ephemeral=True)
+        await interaction.response.send_message(f"✅ {target_name}を {selected_channel.mention} に変更しました！", ephemeral=True)
         self.stop()
 
 class RoleSelectView(discord.ui.View):
@@ -198,7 +194,6 @@ class RoleSelectView(discord.ui.View):
         await interaction.response.send_message(f"✅ 技術部ロールを {selected_role.mention} に設定しました！", ephemeral=True)
         self.stop()
 
-
 # ---------------------------------------------------------
 # 3. ダッシュボードにくっつくメインのボタン群
 # ---------------------------------------------------------
@@ -208,17 +203,23 @@ class SettingsDashboardView(discord.ui.View):
         self.bot = bot
         self.message: discord.Message | None = None 
 
-    @discord.ui.button(label="権限設定チャンネルの変更", style=discord.ButtonStyle.secondary)
-    async def change_channel(self, button: discord.ui.Button, interaction: discord.Interaction):
-        view = ChannelSelectView(self.bot, interaction.message)
-        await interaction.response.send_message("変更先のチャンネルを選択してください：", view=view, ephemeral=True)
+    # ▼ 追加: システムチャンネル用ボタン (row=0)
+    @discord.ui.button(label="システムCHの変更", style=discord.ButtonStyle.secondary, row=0)
+    async def change_system_channel(self, button: discord.ui.Button, interaction: discord.Interaction):
+        view = ChannelSelectView(self.bot, interaction.message, setting_type="system")
+        await interaction.response.send_message("変更先のシステムチャンネルを選択してください：", view=view, ephemeral=True)
 
-    @discord.ui.button(label="技術部ロールの変更", style=discord.ButtonStyle.danger)
+    # 既存のボタン: 権限設定チャンネル用 (row=0)
+    @discord.ui.button(label="権限設定CHの変更", style=discord.ButtonStyle.secondary, row=0)
+    async def change_role_channel(self, button: discord.ui.Button, interaction: discord.Interaction):
+        view = ChannelSelectView(self.bot, interaction.message, setting_type="role")
+        await interaction.response.send_message("変更先の権限設定チャンネルを選択してください：", view=view, ephemeral=True)
+
+    @discord.ui.button(label="技術部ロールの変更", style=discord.ButtonStyle.danger, row=0)
     async def change_engineer_role(self, button: discord.ui.Button, interaction: discord.Interaction):
         view = RoleSelectView(self.bot, interaction.message)
         await interaction.response.send_message("このBotを管理する「技術部」のロールを選択してください：", view=view, ephemeral=True)
 
-    # ▼ 新規追加: カテゴリー設定ボタン
     @discord.ui.button(label="カテゴリーの設定", style=discord.ButtonStyle.primary, row=1)
     async def change_category(self, button: discord.ui.Button, interaction: discord.Interaction):
         view = CategorySelectView(self.bot, interaction.message)

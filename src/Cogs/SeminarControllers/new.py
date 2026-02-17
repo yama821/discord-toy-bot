@@ -2,6 +2,7 @@ import datetime
 
 import discord
 from database import async_session
+from checks import system_channel_only
 from discord import Option
 from discord.commands import slash_command
 from discord.ext import commands
@@ -9,12 +10,15 @@ from model import Seminar, SeminarState, Category, Guild
 from sqlalchemy import select
 from sqlalchemy.exc import NoResultFound
 
+from exceptions import SystemChannelOnlyException, ConfigurationNotCompleteException
+
 
 class New(commands.Cog):
     def __init__(self, bot: discord.Bot):
         self.bot = bot
 
     @commands.guild_only()
+    @system_channel_only()
     @slash_command(
         name="new",
         description="seminar_name が付与されたテキストチャンネルとロールを作成します。",
@@ -241,6 +245,38 @@ class New(commands.Cog):
         async with async_session() as session:
             async with session.begin():
                 session.add(seminar)
+
+    @new.error
+    async def new_error(
+        self, ctx: discord.ApplicationContext, error: commands.CheckFailure
+    ):
+        async with async_session() as session:
+            guild_record = (
+                await session.execute(
+                    select(Guild).where(
+                        Guild.guild_id == ctx.guild_id
+                    )
+                )
+            ).scalar_one_or_none()
+        if isinstance(error, SystemChannelOnlyException):
+            embed = discord.Embed(
+                title=":x: 不正な操作です",
+                description=f"このコマンドは <#{guild_record.system_channel_id}> で実行してください。",
+                color=discord.Colour.red(),
+            )
+            await ctx.respond(embed=embed)
+            return
+
+        if isinstance(error, ConfigurationNotCompleteException):
+            embed = discord.Embed(
+                title=":warning: サーバー設定未完了",
+                description=f"サーバー設定が未完了です。管理者に `/setting` による設定を依頼してください。",
+                color=discord.Colour.yellow(),
+            )
+            await ctx.respond(embed=embed)
+            return
+
+        raise Exception("Unexpected error occurred.")
 
 
 def setup(bot: discord.Bot):

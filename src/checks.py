@@ -1,9 +1,11 @@
 # src/checks.py
 import discord
 from discord.ext import commands
-from database import async_session
-from model import Guild
 from sqlalchemy import select
+
+from database import async_session
+from exceptions import ConfigurationNotCompleteException, SystemChannelOnlyException
+from model import Guild
 
 def is_engineer():
     """コマンド実行者がDBに登録された「技術部ロール」を持っているか判定するデコレーター"""
@@ -23,4 +25,25 @@ def is_engineer():
         else:
             raise commands.CheckFailure("❌ このコマンドは「技術部」専用です。")
             
+    return commands.check(predicate)
+
+def system_channel_only():
+    async def predicate(ctx: discord.ApplicationContext):
+        if not ctx.guild:
+            return False
+
+        async with async_session() as session:
+            stmt = select(Guild).where(Guild.guild_id == ctx.guild.id)
+            guild_record = (await session.execute(stmt)).scalar_one_or_none()
+
+        # サーバー設定（Guildレコード）や system チャンネルが存在しない場合
+        if not guild_record or not guild_record.system_channel_id:
+            raise ConfigurationNotCompleteException()
+
+        # コマンドが実行されたチャンネルが system チャンネルではない場合
+        if ctx.channel.id != guild_record.system_channel_id:
+            raise SystemChannelOnlyException()
+
+        return True
+
     return commands.check(predicate)

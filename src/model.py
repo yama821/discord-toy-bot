@@ -27,6 +27,7 @@ class Guild(Base):
     
     interesting_emoji_id: Mapped[Optional[int]] = mapped_column(default=None)
     role_setting_channel_id: Mapped[Optional[int]] = mapped_column(default=None)
+    system_channel_id: Mapped[Optional[int]] = mapped_column(default=None)
     engineer_role_id: Mapped[Optional[int]] = mapped_column(default=None)
 
 
